@@ -1,0 +1,16 @@
+{
+  "name": "localship",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A local-first, Vercel-like deployment platform.",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/server.mjs",
+    "start": "node src/server.mjs",
+    "test": "node --test",
+    "check": "node --check src/server.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

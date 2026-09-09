@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
+    <title>Localship</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/"><span class="logo">L</span> Localship</a>
+      <nav aria-label="Application">
+        <button id="help-button" class="header-button" type="button">How it works</button>
+        <div class="system"><span class="pulse"></span> Local engine online</div>
+      </nav>
+    </header>
+    <main>
+      <section class="hero">
+        <p class="eyebrow">LOCAL-FIRST DEPLOYMENTS</p>
+        <h1>Your machine.<br><span>Your cloud.</span></h1>
+        <p>Connect a GitHub repository, run it safely on your machine, then publish a shareable web address with one click.</p>
+        <button id="new-project">Add a project <span>→</span></button>
+      </section>
+
+      <section class="journey" aria-labelledby="journey-title">
+        <div class="section-title"><div><p class="eyebrow">GET ONLINE</p><h2 id="journey-title">Three steps, then an optional domain</h2></div><span id="journey-progress">Step 1 of 3</span></div>
+        <ol id="journey-steps" class="journey-steps"></ol>
+      </section>
+
+      <section class="projects-section">
+        <div class="section-title"><h2>Projects</h2><span id="project-count">0 projects</span></div>
+        <div id="projects" class="projects"></div>
+        <div id="empty" class="empty">
+          <svg class="empty-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 12h8M12 8v8M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/></svg>
+          <h3>No deployments yet</h3>
+          <p>Start with a GitHub repository. Localship will guide you through the rest.</p>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="project-dialog">
+      <form id="project-form">
+        <div class="dialog-title"><div><p class="eyebrow">NEW PROJECT</p><h2>Import repository</h2></div><button type="button" class="close" aria-label="Close">×</button></div>
+        <label>Project name<input name="name" required maxlength="80" placeholder="My storefront"></label>
+        <label>GitHub repository<input name="repoUrl" required placeholder="https://github.com/you/repository.git"></label>
+        <div class="form-row">
+          <label>Branch<input name="branch" value="main" required></label>
+          <label>Container port<input name="containerPort" type="number" value="3000" min="1" max="65535" required></label>
+        </div>
+        <p class="hint">Dockerfiles and Flask projects are detected automatically.</p>
+        <p id="form-error" class="error"></p>
+        <button class="submit" type="submit">Create project</button>
+      </form>
+    </dialog>
+
+    <dialog id="domain-dialog">
+      <div class="domain-shell">
+        <div class="dialog-title"><div><p class="eyebrow">CUSTOM DOMAIN</p><h2>Connect hostname</h2></div><button type="button" class="close" aria-label="Close">×</button></div>
+        <section id="domain-choice">
+          <p class="dialog-lead">A custom domain is optional. Your free public preview already works on other devices.</p>
+          <div class="domain-options">
+            <button id="domain-owned" class="option-card" type="button"><strong>I own a domain</strong><span>Verify it and create a permanent address.</span></button>
+            <div class="option-card passive"><strong>I don’t own one yet</strong><span>Buy one from any registrar when you are ready, then return here. Nothing else needs to change now.</span></div>
+          </div>
+          <button type="button" class="secondary full close-domain">Keep using free preview</button>
+        </section>
+        <form id="domain-form" hidden>
+          <input type="hidden" name="projectId">
+          <button id="domain-back" class="text-button" type="button">← Back</button>
+          <p class="wizard-step">STEP 1 OF 3 · ADD DOMAIN</p>
+          <label>Domain you own<input name="hostname" required inputmode="url" autocomplete="url" placeholder="app.example.com"></label>
+          <p class="hint">Enter only the hostname—no <code>https://</code> or path. You will edit its DNS at your registrar or DNS provider.</p>
+          <p id="domain-error" class="error" role="alert"></p>
+          <button class="submit" type="submit">Create verification record</button>
+        </form>
+        <section id="domain-setup" class="domain-setup" hidden>
+          <p class="wizard-step">STEP 2 OF 3 · VERIFY OWNERSHIP</p>
+          <h3>Add this TXT record</h3>
+          <p>Open the DNS settings where your domain is managed, add this record, then wait a few minutes and verify.</p>
+          <div class="dns-record"><span>Type</span><code>TXT</code><span>Name / host</span><code id="dns-name"></code><span>Value</span><code id="dns-value"></code></div>
+          <div class="button-row"><button type="button" class="copy secondary" data-copy="dns-name">Copy name</button><button type="button" class="copy secondary" data-copy="dns-value">Copy value</button></div>
+          <p id="verification-error" class="error" role="alert"></p>
+          <button id="verify-domain" type="button" class="submit">Verify DNS record</button>
+          <div id="verification-success" class="success" hidden><strong>Domain ownership verified</strong><span>Localship can now route this hostname to your project.</span></div>
+          <div class="setup-divider"></div>
+          <p class="wizard-step">STEP 3 OF 3 · CONNECT THE INTERNET</p>
+          <div class="setup-heading"><h3>Run a named Cloudflare Tunnel</h3><span>Recommended</span></div>
+          <p>This keeps your domain public while this computer and Localship are running. Cloudflare may ask you to add the domain to a free account first.</p>
+          <ol class="compact-steps"><li>Install <code>cloudflared</code>.</li><li>Run the commands below.</li><li>Save the configuration and replace its two placeholders.</li></ol>
+          <pre id="cloudflare-commands"></pre>
+          <button type="button" class="copy secondary" data-copy="cloudflare-commands">Copy commands</button>
+          <pre id="cloudflare-config"></pre>
+          <button type="button" class="copy secondary" data-copy="cloudflare-config">Copy configuration</button>
+          <details class="manual-setup"><summary>Manual reverse proxy</summary><ul id="manual-requirements"></ul></details>
+          <button type="button" class="secondary full close-domain">Done for now</button>
+        </section>
+      </div>
+    </dialog>
+    <dialog id="resource-dialog">
+      <form id="resource-form">
+        <input type="hidden" name="projectId">
+        <div class="dialog-title"><div><p class="eyebrow">CONTAINER RESOURCES</p><h2>Set website limits</h2></div><button type="button" class="close" aria-label="Close resource settings">×</button></div>
+        <p class="dialog-lead">Choose compute limits and persistent storage for this website. Changes apply on its next deployment.</p>
+        <label>Suggested profile
+          <select name="preset">
+            <option value="light">Light · static sites and small APIs</option>
+            <option value="standard">Standard · most websites</option>
+            <option value="heavy">Heavy · builds and busy backends</option>
+            <option value="custom">Custom</option>
+          </select>
+        </label>
+        <div class="resource-fields">
+          <label>CPU cores<input name="cpu" type="number" min="0.25" max="16" step="0.25" required><span>0.25–16 cores</span></label>
+          <label>Memory<input name="memoryMb" type="number" min="128" max="32768" step="64" required><span>128–32768 MB</span></label>
+          <label>Process limit<input name="pids" type="number" min="32" max="4096" step="1" required><span>Maximum processes inside the container</span></label>
+          <label>Storage budget<input name="storageGb" type="number" min="0" max="1024" step="0.25" required><span>GB persisted at <code>/data</code>; 0 disables mounting</span></label>
+        </div>
+        <div class="notice compact"><strong>What should I choose?</strong><p>Start with Standard. Save databases and uploads under <code>/data</code> so they survive redeployments. Storage is a monitored budget, not a portable runtime hard cap.</p></div>
+        <p id="resource-error" class="error" role="alert"></p>
+        <button class="submit" type="submit">Save resource limits</button>
+      </form>
+    </dialog>
+    <dialog id="help-dialog" class="help-dialog">
+      <div class="help-content">
+        <div class="dialog-title"><div><p class="eyebrow">LOCALSHIP GUIDE</p><h2>From repository to public website</h2></div><button type="button" class="close" aria-label="Close guide">×</button></div>
+        <ol class="help-steps">
+          <li><span>1</span><div><h3>Add a project</h3><p>Enter a GitHub repository, branch, and the port used by the application. Localship stores the connection locally.</p></div></li>
+          <li><span>2</span><div><h3>Set resources and deploy</h3><p>Choose Manage beside Container limits to set CPU, memory, processes, and persistent storage. Data written to <code>/data</code> survives redeployments.</p></div></li>
+          <li><span>3</span><div><h3>Publish preview</h3><p>A free Cloudflare Quick Tunnel creates a temporary HTTPS URL that works from phones and other computers. Your computer and Localship must remain running.</p></div></li>
+          <li><span>4</span><div><h3>Optional: connect a domain</h3><p>If you own a domain, Localship gives you a TXT record to prove ownership and a named-tunnel configuration for a stable address. You can skip this entirely.</p></div></li>
+        </ol>
+        <div class="notice"><strong>Local versus public</strong><p><code>*.localhost</code> links work only on this computer. <code>*.trycloudflare.com</code> links are public but temporary. A purchased custom domain is the stable production option.</p></div>
+        <button type="button" class="submit close-guide">Got it</button>
+      </div>
+    </dialog>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
