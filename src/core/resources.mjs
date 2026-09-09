@@ -3,6 +3,7 @@ export const DEFAULT_RESOURCES = Object.freeze({
   memoryMb: 512,
   pids: 256,
   storageGb: 5,
+  gpu: false,
 });
 
 export function normalizeResources(input = DEFAULT_RESOURCES) {
@@ -10,6 +11,7 @@ export function normalizeResources(input = DEFAULT_RESOURCES) {
   const memoryMb = Number.parseInt(input?.memoryMb ?? DEFAULT_RESOURCES.memoryMb, 10);
   const pids = Number.parseInt(input?.pids ?? DEFAULT_RESOURCES.pids, 10);
   const storageGb = Number(input?.storageGb ?? DEFAULT_RESOURCES.storageGb);
+  const gpu = input?.gpu ?? DEFAULT_RESOURCES.gpu;
 
   if (!Number.isFinite(cpu) || cpu < 0.25 || cpu > 16) {
     throw new Error('CPU limit must be between 0.25 and 16 cores');
@@ -23,17 +25,22 @@ export function normalizeResources(input = DEFAULT_RESOURCES) {
   if (!Number.isFinite(storageGb) || storageGb < 0 || (storageGb > 0 && storageGb < 0.25) || storageGb > 1024) {
     throw new Error('Storage budget must be 0 (disabled) or between 0.25 and 1024 GB');
   }
+  if (typeof gpu !== 'boolean') {
+    throw new Error('GPU setting must be true or false');
+  }
 
-  return { cpu, memoryMb, pids, storageGb };
+  return { cpu, memoryMb, pids, storageGb, gpu };
 }
 
 export function dockerResourceArgs(input) {
   const resources = normalizeResources(input);
-  return [
+  const args = [
     '--memory', `${resources.memoryMb}m`,
     '--cpus', String(resources.cpu),
     '--pids-limit', String(resources.pids),
   ];
+  if (resources.gpu) args.push('--gpus', 'all');
+  return args;
 }
 
 export function setProjectResources(state, projectId, input) {

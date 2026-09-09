@@ -28,7 +28,9 @@ Then open <http://127.0.0.1:4321>.
 - Give every project an automatic `project.localhost` development URL.
 - Generate Cloudflare Tunnel and manual reverse-proxy instructions for user-owned domains.
 - Publish temporary public HTTPS previews through Cloudflare Quick Tunnels.
-- Configure per-project CPU, memory, and process limits with safe presets.
+- Configure per-project CPU, memory, process, storage, and optional GPU access.
+- See per-project request totals, 24-hour traffic, error rate, and data served.
+- Pause and resume containers, terminate runtimes, or safely delete projects from the dashboard.
 
 GitHub App installation, managed secrets, and hosted control-plane features remain future work.
 
@@ -54,7 +56,18 @@ Every project card shows its configured container limits. Choose **Manage** to s
 
 Custom limits accept 0.25–16 CPUs, 128–32768 MB of memory, 0–1024 GB of persistent storage, and 32–4096 processes. Saved changes apply to the next deployment, and each deployment records the limits it actually used.
 
+GPU access is opt-in. Turn on **Use host GPU** under **Manage** only when Docker is configured for GPU containers. Localship passes `--gpus all` to the container; NVIDIA drivers and NVIDIA Container Toolkit/Docker GPU support must already be installed on the host.
+
 When storage is enabled, Localship mounts `.localship/volumes/PROJECT_ID` into the container at `/data` and provides `LOCALSHIP_DATA_DIR=/data`. Databases and uploads must be configured to use that directory. Localship measures its usage and preserves it when containers are replaced. Because portable Docker bind mounts cannot enforce a reliable cross-platform quota, the configured amount is a monitored budget: Localship blocks a new deployment if existing data is already over budget, but it cannot stop a running application from exceeding it. Back up important data separately.
+
+Each project card includes local traffic analytics. Requests are counted at Localship's proxy, including total requests, requests during the last 24 hours, HTTP error rate, and response bytes served. Dashboard API traffic is excluded.
+
+## Project lifecycle controls
+
+- **Pause** stops the current container and public preview but keeps the container ready to resume.
+- **Resume** starts the same paused container again.
+- **Terminate** removes the running container while keeping the project settings and persistent `/data`; deploy again to create a new runtime.
+- **Delete project** removes the project, domains, analytics, containers, checkout, and generated build recipe. Persistent `/data` is kept as a local backup unless the user explicitly selects permanent data deletion and types the project name to confirm.
 
 ## GitHub webhook
 

@@ -5,16 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="color-scheme" content="dark">
     <title>Localship</title>
-    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
     <header>
-      <a class="brand" href="/"><span class="logo">L</span> Localship</a>
+      <a class="brand" href="./"><span class="logo">L</span> Localship</a>
       <nav aria-label="Application">
         <button id="help-button" class="header-button" type="button">How it works</button>
         <div class="system"><span class="pulse"></span> Local engine online</div>
       </nav>
     </header>
+    <section id="direct-file-warning" class="direct-file-warning" hidden>
+      <p class="eyebrow">LOCALSHIP IS NOT RUNNING</p>
+      <h1>Start the server<br><span>before opening the dashboard.</span></h1>
+      <p>This file is the dashboard interface, not a standalone website. Localship needs its Node.js backend to deploy containers, store projects, and serve analytics.</p>
+      <ol>
+        <li>Open PowerShell or a terminal in the cloned Localship repository folder.</li>
+        <li>Start Docker Desktop and wait until it is ready.</li>
+        <li>Run <code>npm start</code>.</li>
+        <li>Open <a href="http://127.0.0.1:4321">http://127.0.0.1:4321</a>.</li>
+      </ol>
+    </section>
     <main>
       <section class="hero">
         <p class="eyebrow">LOCAL-FIRST DEPLOYMENTS</p>
@@ -116,9 +127,26 @@
           <label>Process limit<input name="pids" type="number" min="32" max="4096" step="1" required><span>Maximum processes inside the container</span></label>
           <label>Storage budget<input name="storageGb" type="number" min="0" max="1024" step="0.25" required><span>GB persisted at <code>/data</code>; 0 disables mounting</span></label>
         </div>
+        <label class="toggle-row">
+          <span><strong>Use host GPU</strong><small>Pass all supported GPUs into this container on its next deployment.</small></span>
+          <input name="gpu" type="checkbox" role="switch" aria-describedby="gpu-help">
+        </label>
+        <p id="gpu-help" class="hint">Requires a supported NVIDIA GPU, current drivers, and NVIDIA Container Toolkit/Docker GPU support. Leave this off for ordinary websites.</p>
         <div class="notice compact"><strong>What should I choose?</strong><p>Start with Standard. Save databases and uploads under <code>/data</code> so they survive redeployments. Storage is a monitored budget, not a portable runtime hard cap.</p></div>
         <p id="resource-error" class="error" role="alert"></p>
         <button class="submit" type="submit">Save resource limits</button>
+      </form>
+    </dialog>
+    <dialog id="delete-project-dialog">
+      <form id="delete-project-form">
+        <input type="hidden" name="projectId">
+        <div class="dialog-title"><div><p class="eyebrow danger-text">DANGER ZONE</p><h2>Delete project</h2></div><button type="button" class="close" aria-label="Close delete confirmation">×</button></div>
+        <p class="dialog-lead">This removes <strong id="delete-project-name"></strong> from Localship, stops public sharing, removes its containers, and deletes its checked-out source.</p>
+        <div class="notice danger-notice"><strong>Persistent website data is protected by default</strong><p>Leave the option below unchecked to keep the project’s <code>/data</code> files as a local backup.</p></div>
+        <label>Type the project name to confirm<input name="confirmName" required autocomplete="off"></label>
+        <label class="checkbox delete-storage"><input name="deleteStorage" type="checkbox"><span>Also permanently delete persistent website data</span></label>
+        <p id="delete-project-error" class="error" role="alert"></p>
+        <div class="dialog-actions"><button type="button" class="secondary close">Cancel</button><button type="submit" class="danger-button">Delete project</button></div>
       </form>
     </dialog>
     <dialog id="help-dialog" class="help-dialog">
@@ -126,15 +154,29 @@
         <div class="dialog-title"><div><p class="eyebrow">LOCALSHIP GUIDE</p><h2>From repository to public website</h2></div><button type="button" class="close" aria-label="Close guide">×</button></div>
         <ol class="help-steps">
           <li><span>1</span><div><h3>Add a project</h3><p>Enter a GitHub repository, branch, and the port used by the application. Localship stores the connection locally.</p></div></li>
-          <li><span>2</span><div><h3>Set resources and deploy</h3><p>Choose Manage beside Container limits to set CPU, memory, processes, and persistent storage. Data written to <code>/data</code> survives redeployments.</p></div></li>
+          <li><span>2</span><div><h3>Set resources and deploy</h3><p>Choose Manage beside Container limits to set CPU, memory, processes, persistent storage, and optional GPU access. Data written to <code>/data</code> survives redeployments.</p></div></li>
           <li><span>3</span><div><h3>Publish preview</h3><p>A free Cloudflare Quick Tunnel creates a temporary HTTPS URL that works from phones and other computers. Your computer and Localship must remain running.</p></div></li>
           <li><span>4</span><div><h3>Optional: connect a domain</h3><p>If you own a domain, Localship gives you a TXT record to prove ownership and a named-tunnel configuration for a stable address. You can skip this entirely.</p></div></li>
+          <li><span>5</span><div><h3>Control the runtime safely</h3><p>Pause keeps a resumable container, Terminate removes only the runtime, and Delete project requires confirmation while preserving persistent data by default.</p></div></li>
         </ol>
         <div class="notice"><strong>Local versus public</strong><p><code>*.localhost</code> links work only on this computer. <code>*.trycloudflare.com</code> links are public but temporary. A purchased custom domain is the stable production option.</p></div>
         <button type="button" class="submit close-guide">Got it</button>
       </div>
     </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
-    <script type="module" src="/app.js"></script>
+    <div id="app-entry" data-src="./app.js" hidden></div>
+    <script>
+      if (location.protocol === 'file:') {
+        document.querySelector('#direct-file-warning').hidden = false;
+        document.querySelector('main').hidden = true;
+        document.querySelector('#help-button').hidden = true;
+        document.querySelector('.system').textContent = 'Local engine offline';
+      } else {
+        const script = document.createElement('script');
+        script.type = 'module';
+        script.src = document.querySelector('#app-entry').dataset.src;
+        document.body.append(script);
+      }
+    </script>
   </body>
 </html>

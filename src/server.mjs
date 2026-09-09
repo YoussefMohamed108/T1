@@ -9,6 +9,10 @@ import { branchFromRef, verifyGitHubSignature } from './core/github.mjs';
 import { JsonStore } from './core/store.mjs';
 import { normalizeDomain, normalizeProjectInput } from './core/validation.mjs';
 import { normalizeResources, setProjectResources } from './core/resources.mjs';
+import { projectAnalytics, recordRequestAnalytics } from './core/analytics.mjs';
+import { startupErrorMessage } from './core/startup.mjs';
+import { deleteProject, pauseProject, resumeProject, terminateProject } from './core/project-lifecycle.mjs';
+import { runCommand } from './core/command.mjs';
 import { directorySizeBytes, persistentStoragePath, storageBudgetBytes } from './core/storage.mjs';
 import { DeploymentService } from './services/deployments.mjs';
 import { proxyRequest } from './services/proxy.mjs';
@@ -68,7 +72,14 @@ async function serveAsset(res, file, type) {
 const server = http.createServer(async (req, res) => {
   try {
     const route = routeHostname(store.snapshot(), req.headers.host);
-    if (route.deployment?.localPort) return proxyRequest(req, res, route.deployment.localPort);
+    if (route.deployment?.localPort) {
+      return proxyRequest(req, res, route.deployment.localPort, {
+        onComplete: (event) => {
+          store.update((state) => recordRequestAnalytics(state, { ...event, projectId: route.project.id }))
+            .catch((error) => console.error(`Could not save analytics: ${error.message}`));
+        },
+      });
+    }
     if (route.matched) return sendJson(res, 503, { error: 'This project does not have a ready deployment' });
 
     const url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
@@ -82,6 +93,7 @@ const server = http.createServer(async (req, res) => {
         ...project,
         resources: normalizeResources(project.resources),
         storage: await projectStorage(project),
+        analytics: projectAnalytics(state, project.id),
         defaultHostname: defaultHostname(project),
         defaultUrl: `http://${defaultHostname(project)}:${config.port}`,
       })));
@@ -122,6 +134,67 @@ const server = http.createServer(async (req, res) => {
       if (deployments.isDeploying(projectId)) return sendJson(res, 409, { error: 'Deployment already running' });
       deployments.deploy(projectId).catch((error) => console.error(error.message));
       return sendJson(res, 202, { status: 'building' });
+    }
+
+    const lifecycleMatch = url.pathname.match(/^\/api\/projects\/([\w-]+)\/(pause|resume|terminate)$/);
+    if (req.method === 'POST' && lifecycleMatch) {
+      const [, projectId, action] = lifecycleMatch;
+      if (deployments.isDeploying(projectId)) return sendJson(res, 409, { error: 'Wait for the current deployment to finish first' });
+      const state = store.snapshot();
+      const allowedStatuses = action === 'pause' ? ['ready'] : action === 'resume' ? ['paused'] : ['ready', 'paused'];
+      const runtime = state.deployments.find(
+        (item) => item.projectId === projectId && allowedStatuses.includes(item.status),
+      );
+      if (!state.projects.some((item) => item.id === projectId)) return sendJson(res, 404, { error: 'Project not found' });
+      if (!runtime?.containerName) return sendJson(res, 409, { error: `Project cannot ${action} because it has no matching running container` });
+      if (action === 'pause') {
+        await runCommand('docker', ['stop', runtime.containerName]);
+        quickTunnels.stop(projectId);
+        const updated = await store.update((current) => pauseProject(current, projectId));
+        return sendJson(res, 200, updated);
+      }
+      if (action === 'resume') {
+        await runCommand('docker', ['start', runtime.containerName]);
+        const updated = await store.update((current) => resumeProject(current, projectId));
+        return sendJson(res, 200, updated);
+      }
+      await runCommand('docker', ['rm', '--force', runtime.containerName]);
+      quickTunnels.stop(projectId);
+      const updated = await store.update((current) => terminateProject(current, projectId));
+      return sendJson(res, 200, updated);
+    }
+
+    const deleteProjectMatch = url.pathname.match(/^\/api\/projects\/([\w-]+)$/);
+    if (req.method === 'DELETE' && deleteProjectMatch) {
+      const projectId = deleteProjectMatch[1];
+      if (deployments.isDeploying(projectId)) return sendJson(res, 409, { error: 'Wait for the current deployment to finish before deleting the project' });
+      const input = JSON.parse((await readBody(req)).toString('utf8') || '{}');
+      const snapshot = store.snapshot();
+      const project = snapshot.projects.find((item) => item.id === projectId);
+      if (!project) return sendJson(res, 404, { error: 'Project not found' });
+      const containerNames = [...new Set(snapshot.deployments
+        .filter((item) => item.projectId === projectId)
+        .map((item) => item.containerName)
+        .filter(Boolean))];
+      const cleanupWarnings = [];
+      quickTunnels.stop(projectId);
+      for (const containerName of containerNames) {
+        await runCommand('docker', ['rm', '--force', containerName]).catch((error) => cleanupWarnings.push(error.message));
+      }
+      await fs.rm(path.join(config.dataDir, 'repos', projectId), { recursive: true, force: true });
+      await fs.rm(path.join(config.dataDir, 'build-recipes', `${projectId}.Dockerfile`), { force: true });
+      if (input.deleteStorage === true) {
+        await fs.rm(persistentStoragePath(config.dataDir, projectId), { recursive: true, force: true });
+      }
+      await store.update((current) => deleteProject(current, projectId));
+      storageUsageCache.delete(projectId);
+      return sendJson(res, 200, {
+        status: 'deleted',
+        projectId,
+        storageDeleted: input.deleteStorage === true,
+        preservedStoragePath: input.deleteStorage === true ? null : persistentStoragePath(config.dataDir, projectId),
+        cleanupWarnings,
+      });
     }
 
     const publishMatch = url.pathname.match(/^\/api\/projects\/([\w-]+)\/publish$/);
@@ -203,6 +276,11 @@ const server = http.createServer(async (req, res) => {
     console.error(error);
     sendJson(res, error instanceof SyntaxError ? 400 : 422, { error: error.message });
   }
+});
+
+server.once('error', (error) => {
+  console.error(startupErrorMessage(error, config));
+  process.exitCode = 1;
 });
 
 server.listen(config.port, config.host, () => {

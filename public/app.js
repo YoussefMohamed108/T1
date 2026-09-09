@@ -3,9 +3,11 @@ const empty = document.querySelector('#empty');
 const projectDialog = document.querySelector('#project-dialog');
 const domainDialog = document.querySelector('#domain-dialog');
 const resourceDialog = document.querySelector('#resource-dialog');
+const deleteProjectDialog = document.querySelector('#delete-project-dialog');
 const helpDialog = document.querySelector('#help-dialog');
 let latestState = null;
 let currentDomainId = null;
+let currentDeleteProject = null;
 
 function announce(message, kind = 'info') {
   const toast = document.querySelector('#toast');
@@ -36,13 +38,14 @@ function timeAgo(value) {
 }
 
 const resourcePresets = {
-  light: { cpu: 0.5, memoryMb: 256, pids: 128, storageGb: 1 },
-  standard: { cpu: 1, memoryMb: 512, pids: 256, storageGb: 5 },
-  heavy: { cpu: 2, memoryMb: 2048, pids: 512, storageGb: 20 },
+  light: { cpu: 0.5, memoryMb: 256, pids: 128, storageGb: 1, gpu: false },
+  standard: { cpu: 1, memoryMb: 512, pids: 256, storageGb: 5, gpu: false },
+  heavy: { cpu: 2, memoryMb: 2048, pids: 512, storageGb: 20, gpu: false },
 };
 
 function sameResources(left, right) {
-  return left.cpu === right.cpu && left.memoryMb === right.memoryMb && left.pids === right.pids && left.storageGb === right.storageGb;
+  return left.cpu === right.cpu && left.memoryMb === right.memoryMb && left.pids === right.pids
+    && left.storageGb === right.storageGb && Boolean(left.gpu) === Boolean(right.gpu);
 }
 
 function resourceLabel(resources) {
@@ -50,7 +53,8 @@ function resourceLabel(resources) {
     ? `${resources.memoryMb / 1024} GB`
     : `${resources.memoryMb} MB`;
   const storage = resources.storageGb ? `${resources.storageGb} GB storage` : 'storage off';
-  return `${resources.cpu} CPU · ${memory} · ${storage} · ${resources.pids} processes`;
+  const gpu = resources.gpu ? 'GPU enabled' : 'GPU off';
+  return `${resources.cpu} CPU · ${memory} · ${storage} · ${resources.pids} processes · ${gpu}`;
 }
 
 function formatBytes(bytes) {
@@ -64,6 +68,20 @@ function presetFor(resources) {
   return Object.entries(resourcePresets).find(([, values]) => sameResources(values, resources))?.[0] ?? 'custom';
 }
 
+function analyticsMarkup(analytics) {
+  const metrics = analytics ?? { totalRequests: 0, errorRate: 0, responseBytes: 0, last24Hours: [] };
+  const requests24h = metrics.last24Hours.reduce((total, hour) => total + hour.requests, 0);
+  const peak = Math.max(1, ...metrics.last24Hours.map((hour) => hour.requests));
+  const bars = metrics.last24Hours.length
+    ? metrics.last24Hours.map((hour) => `<span style="--traffic:${Math.max(8, (hour.requests / peak) * 100)}%" title="${escapeHtml(new Date(hour.hour).toLocaleString())}: ${hour.requests} requests"></span>`).join('')
+    : '<span class="empty-bar" title="No traffic recorded yet"></span>';
+  return `<section class="analytics" aria-label="Website analytics">
+    <div class="analytics-heading"><strong>Traffic analytics</strong><span>Hosted website requests only</span></div>
+    <div class="analytics-metrics"><div><strong>${metrics.totalRequests.toLocaleString()}</strong><span>Total requests</span></div><div><strong>${requests24h.toLocaleString()}</strong><span>Last 24 hours</span></div><div><strong>${metrics.errorRate}%</strong><span>Error rate</span></div><div><strong>${formatBytes(metrics.responseBytes)}</strong><span>Data served</span></div></div>
+    <div class="traffic-bars" aria-label="Requests by active hour">${bars}</div>
+  </section>`;
+}
+
 async function render() {
   const state = await request('/api/state');
   latestState = state;
@@ -71,7 +89,9 @@ async function render() {
   document.querySelector('#project-count').textContent = `${state.projects.length} project${state.projects.length === 1 ? '' : 's'}`;
   empty.hidden = state.projects.length > 0;
   projectList.innerHTML = state.projects.map((project) => {
-    const deployment = state.deployments.find((item) => item.projectId === project.id);
+    const latestDeployment = state.deployments.find((item) => item.projectId === project.id);
+    const runtime = state.deployments.find((item) => item.projectId === project.id && ['ready', 'paused'].includes(item.status));
+    const deployment = runtime ?? latestDeployment;
     const domains = state.domains.filter((item) => item.projectId === project.id);
     const tunnel = state.quickTunnels[project.id] ?? { status: 'not-published', publicUrl: null };
     const status = deployment?.status ?? 'not-deployed';
@@ -81,6 +101,7 @@ async function render() {
       deployment?.resources?.storageGb === undefined || !sameResources(configuredResources, deployedResources)
     );
     const isReady = status === 'ready';
+    const isPaused = status === 'paused';
     const isPublishing = tunnel.status === 'connecting';
     const isPublished = tunnel.status === 'published';
     return `<article class="project-card">
@@ -91,19 +112,20 @@ async function render() {
       ${tunnel.status === 'error' ? `<div class="inline-error"><strong>Could not publish</strong><span>${escapeHtml(tunnel.error)}</span><a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/" target="_blank" rel="noreferrer">Install cloudflared ↗</a></div>` : ''}
       <div class="meta"><span>Branch <strong>${escapeHtml(project.branch)}</strong></span><span>${timeAgo(deployment?.createdAt)}</span></div>
       <div class="resource-summary"><div class="resource-copy"><strong>Container resources</strong><span>${resourceLabel(configuredResources)}</span><div class="storage-meter"><div><span>Persistent storage used</span><span>${formatBytes(project.storage.usedBytes)} / ${configuredResources.storageGb || 0} GB</span></div><progress value="${project.storage.percentUsed}" max="100" aria-label="Persistent storage ${project.storage.percentUsed.toFixed(1)} percent used"></progress></div>${resourcesPending ? '<span class="pending-change">Redeploy to apply these changes</span>' : ''}</div><button type="button" data-resources="${project.id}">Manage</button></div>
+      ${analyticsMarkup(project.analytics)}
       ${domains.map((domain) => domain.status === 'active'
         ? `<a class="domain" href="https://${escapeHtml(domain.hostname)}" target="_blank" rel="noreferrer"><span>${escapeHtml(domain.hostname)}</span><small>verified ↗</small></a>`
         : `<button class="domain" type="button" data-manage-domain="${domain.id}" ${domain.setup?.verification ? '' : 'disabled'}><span>${escapeHtml(domain.hostname)}</span><small>${domain.setup?.verification ? 'finish setup' : 'pending'}</small></button>`).join('')}
-      ${deployment?.logs ? `<details><summary>Build logs</summary><pre>${escapeHtml(deployment.logs)}</pre></details>` : ''}
-      <div class="action-guide"><strong>Next actions</strong><span>Deploy creates the container. Publish makes it reachable from the internet.</span></div>
-      <div class="actions"><button data-deploy="${project.id}" ${status === 'building' ? 'disabled' : ''}>${status === 'building' ? 'Building…' : 'Deploy'}</button>${isPublished ? `<button class="secondary" data-unpublish="${project.id}">Stop sharing</button>` : `<button class="publish" data-publish="${project.id}" ${!isReady || isPublishing ? 'disabled' : ''}>${isPublishing ? 'Publishing…' : 'Publish preview'}</button>`}<button class="secondary" data-domain="${project.id}">Custom domain</button></div>
+      ${latestDeployment?.logs ? `<details><summary>Build logs</summary><pre>${escapeHtml(latestDeployment.logs)}</pre></details>` : ''}
+      <div class="action-guide"><strong>Runtime controls</strong><span>Pause is reversible. Terminate removes only the container. Delete removes the Localship project.</span></div>
+      <div class="actions"><button data-deploy="${project.id}" ${status === 'building' || isPaused ? 'disabled' : ''}>${status === 'building' ? 'Building…' : 'Deploy'}</button>${isPublished ? `<button class="secondary" data-unpublish="${project.id}">Stop sharing</button>` : `<button class="publish" data-publish="${project.id}" ${!isReady || isPublishing ? 'disabled' : ''}>${isPublishing ? 'Publishing…' : 'Publish preview'}</button>`}<button class="secondary" data-domain="${project.id}">Custom domain</button>${isReady ? `<button class="secondary" data-pause="${project.id}">Pause</button>` : ''}${isPaused ? `<button class="secondary" data-resume="${project.id}">Resume</button>` : ''}${isReady || isPaused ? `<button class="warning-button" data-terminate="${project.id}">Terminate</button>` : ''}<button class="danger-button" data-delete-project="${project.id}" ${status === 'building' ? 'disabled' : ''}>Delete project</button></div>
     </article>`;
   }).join('');
 }
 
 function renderJourney(state) {
   const hasProject = state.projects.length > 0;
-  const hasDeployment = state.deployments.some((item) => item.status === 'ready');
+  const hasDeployment = state.deployments.some((item) => ['ready', 'paused', 'terminated'].includes(item.status));
   const hasPublicUrl = Object.values(state.quickTunnels).some((item) => item.status === 'published');
   const hasDomain = state.domains.some((item) => item.status === 'active');
   const steps = [
@@ -172,6 +194,7 @@ function fillResourceForm(project) {
   form.querySelector('[name=memoryMb]').value = project.resources.memoryMb;
   form.querySelector('[name=pids]').value = project.resources.pids;
   form.querySelector('[name=storageGb]').value = project.resources.storageGb;
+  form.querySelector('[name=gpu]').checked = project.resources.gpu;
   form.querySelector('[name=preset]').value = presetFor(project.resources);
   document.querySelector('#resource-error').textContent = '';
 }
@@ -180,7 +203,11 @@ document.querySelector('#resource-form [name=preset]').addEventListener('change'
   const values = resourcePresets[event.target.value];
   if (!values) return;
   const form = event.target.form;
-  for (const [name, value] of Object.entries(values)) form.querySelector(`[name=${name}]`).value = value;
+  for (const [name, value] of Object.entries(values)) {
+    const field = form.querySelector(`[name=${name}]`);
+    if (field.type === 'checkbox') field.checked = value;
+    else field.value = value;
+  }
 });
 
 document.querySelectorAll('#resource-form input[type=number]').forEach((input) => input.addEventListener('input', () => {
@@ -207,6 +234,10 @@ projectList.addEventListener('click', async (event) => {
   const domain = event.target.closest('[data-domain]');
   const manageDomain = event.target.closest('[data-manage-domain]');
   const resources = event.target.closest('[data-resources]');
+  const pause = event.target.closest('[data-pause]');
+  const resume = event.target.closest('[data-resume]');
+  const terminate = event.target.closest('[data-terminate]');
+  const deleteButton = event.target.closest('[data-delete-project]');
   if (deploy) {
     deploy.disabled = true;
     deploy.textContent = 'Building…';
@@ -240,6 +271,68 @@ projectList.addEventListener('click', async (event) => {
   if (resources) {
     const project = latestState.projects.find((item) => item.id === resources.dataset.resources);
     if (project) { fillResourceForm(project); resourceDialog.showModal(); }
+  }
+  if (pause) {
+    try {
+      await request(`/api/projects/${pause.dataset.pause}/pause`, { method: 'POST' });
+      announce('Project paused. Its container is preserved and can be resumed.');
+      await render();
+    } catch (exception) { announce(exception.message, 'error'); }
+  }
+  if (resume) {
+    try {
+      await request(`/api/projects/${resume.dataset.resume}/resume`, { method: 'POST' });
+      announce('Project resumed.');
+      await render();
+    } catch (exception) { announce(exception.message, 'error'); }
+  }
+  if (terminate) {
+    const project = latestState.projects.find((item) => item.id === terminate.dataset.terminate);
+    if (window.confirm(`Terminate ${project.name}? The running container will be removed, but the project and persistent data will remain.`)) {
+      try {
+        await request(`/api/projects/${project.id}/terminate`, { method: 'POST' });
+        announce('Runtime terminated. Deploy again whenever you want to recreate it.');
+        await render();
+      } catch (exception) { announce(exception.message, 'error'); }
+    }
+  }
+  if (deleteButton) {
+    currentDeleteProject = latestState.projects.find((item) => item.id === deleteButton.dataset.deleteProject);
+    const form = document.querySelector('#delete-project-form');
+    form.reset();
+    form.querySelector('[name=projectId]').value = currentDeleteProject.id;
+    document.querySelector('#delete-project-name').textContent = currentDeleteProject.name;
+    document.querySelector('#delete-project-error').textContent = '';
+    deleteProjectDialog.showModal();
+    form.querySelector('[name=confirmName]').focus();
+  }
+});
+
+document.querySelector('#delete-project-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const form = new FormData(event.currentTarget);
+  const error = document.querySelector('#delete-project-error');
+  const button = event.currentTarget.querySelector('[type=submit]');
+  if (!currentDeleteProject || form.get('confirmName') !== currentDeleteProject.name) {
+    error.textContent = 'Enter the project name exactly as shown.';
+    return;
+  }
+  try {
+    button.disabled = true;
+    button.textContent = 'Deleting…';
+    const result = await request(`/api/projects/${currentDeleteProject.id}`, {
+      method: 'DELETE',
+      body: JSON.stringify({ deleteStorage: form.get('deleteStorage') === 'on' }),
+    });
+    deleteProjectDialog.close();
+    currentDeleteProject = null;
+    announce(result.storageDeleted ? 'Project and persistent data deleted.' : 'Project deleted. Persistent data was kept as a local backup.');
+    await render();
+  } catch (exception) {
+    error.textContent = exception.message;
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Delete project';
   }
 });
 
@@ -287,7 +380,10 @@ document.querySelector('#resource-form').addEventListener('submit', async (event
     button.textContent = 'Saving…';
     await request(`/api/projects/${form.get('projectId')}/resources`, {
       method: 'PUT',
-      body: JSON.stringify({ cpu: form.get('cpu'), memoryMb: form.get('memoryMb'), pids: form.get('pids'), storageGb: form.get('storageGb') }),
+      body: JSON.stringify({
+        cpu: form.get('cpu'), memoryMb: form.get('memoryMb'), pids: form.get('pids'), storageGb: form.get('storageGb'),
+        gpu: form.get('gpu') === 'on',
+      }),
     });
     resourceDialog.close();
     announce('Resource limits saved. Deploy again to apply them to the running website.');

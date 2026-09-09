@@ -171,7 +171,7 @@ The container port is not port 4321. For example, if the website runs on port 30
 
 Expected result: a project card appears with a local address such as `my-project.localhost:4321` and status **not deployed**.
 
-## 8. Configure CPU, memory, processes, and storage
+## 8. Configure CPU, memory, processes, storage, and GPU
 
 Select **Manage** in the project card's **Container resources** section.
 
@@ -197,6 +197,15 @@ Persistent storage behavior:
 
 After changing resources, select **Deploy** again to apply them.
 
+GPU access is off by default. To use it:
+
+1. Install current NVIDIA drivers and configure Docker GPU support/NVIDIA Container Toolkit.
+2. Open **Manage** for the project.
+3. Turn on **Use host GPU**.
+4. Save and deploy again.
+
+Localship passes all Docker-supported host GPUs into that container with `--gpus all`. Leave the switch off for websites that do not need GPU compute. If Docker is not configured for GPUs, the deployment fails and the exact Docker error appears under **Build logs**.
+
 ## 9. Deploy the website
 
 1. Select **Deploy** on the project card.
@@ -207,6 +216,25 @@ After changing resources, select **Deploy** again to apply them.
 Expected result: the status changes from **building** to **ready**, and the local hostname opens the website.
 
 The first build may take several minutes because Docker may need to download base images. Later builds are usually faster because Docker caches layers.
+
+The project card begins recording traffic after the website is reached through its Localship hostname or connected domain. **Traffic analytics** shows total requests, requests during the last 24 hours, HTTP error rate, and response data served. Visits to the Localship dashboard itself are not counted.
+
+### Pause, resume, terminate, or delete a project
+
+Each project card provides lifecycle controls:
+
+| Action | Container | Project settings | Persistent `/data` |
+| --- | --- | --- | --- |
+| Pause | Stopped but preserved | Preserved | Preserved |
+| Resume | Starts the paused container | Preserved | Preserved |
+| Terminate | Removed | Preserved | Preserved |
+| Delete project | Removed | Deleted | Preserved by default |
+
+Pausing also stops its temporary public preview. Resume the project and select **Publish preview** again when public access is needed.
+
+Use **Terminate** when you want to release runtime resources but may deploy the project again. The website becomes unavailable until its next deployment.
+
+Use **Delete project** to remove it from Localship. Type the exact project name in the confirmation dialog. Leave **Also permanently delete persistent website data** unchecked to retain `.localship/volumes/PROJECT_ID` as a local backup; selecting it permanently removes those files.
 
 ## 10. Publish a temporary public preview
 
@@ -298,6 +326,27 @@ Treat `.localship/state.json` as sensitive because it contains webhook secrets.
 
 ## 15. Troubleshooting
 
+### Opening `public/index.html` looks broken
+
+Do not use `public/index.html` as the application address. It is the dashboard interface and needs Localship's Node.js backend for project data, deployments, and analytics. Run `npm start`, keep that terminal open, and visit <http://127.0.0.1:4321>. If someone opens the HTML file directly, it now displays these startup instructions instead of an incomplete dashboard.
+
+### Localship says port 4321 is already in use
+
+Only one process can listen on the same address and port. First open <http://127.0.0.1:4321>; Localship may already be running in another terminal. Otherwise identify the process on Windows:
+
+```powershell
+Get-NetTCPConnection -LocalPort 4321 -State Listen
+```
+
+Stop the existing process only if you recognize it, or use another port for this instance:
+
+```powershell
+$env:PORT = "4322"
+npm start
+```
+
+Localship now prints these options directly instead of an unhandled Node.js stack trace.
+
 ### GitHub cloning fails
 
 Test HTTPS connectivity on Windows:
@@ -357,6 +406,16 @@ Confirm the application writes to `/data`, not its source directory or another c
 ### Storage is over budget
 
 Increase the storage budget or safely remove unneeded data from `.localship/volumes/PROJECT_ID`, then deploy again. Make a backup before deleting persistent files.
+
+### A GPU deployment fails
+
+Turn **Use host GPU** off unless the site needs GPU compute. If it does, verify Docker GPU access independently before redeploying:
+
+```powershell
+docker run --rm --gpus all nvidia/cuda:13.0.0-base-ubuntu24.04 nvidia-smi
+```
+
+Use a CUDA image tag supported by your installed drivers if that example is unavailable.
 
 ## 16. Current limitations
 

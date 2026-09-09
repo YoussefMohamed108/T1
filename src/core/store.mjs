@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-const EMPTY_STATE = { projects: [], deployments: [], domains: [] };
+const EMPTY_STATE = { projects: [], deployments: [], domains: [], analytics: {} };
 
 export class JsonStore {
   #file;
